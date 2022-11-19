@@ -248,12 +248,14 @@ class MedtronicHistoryData @Inject constructor(
         showLogs("isPumpSuspended: ", gson.toJson(items))
         return if (isCollectionNotEmpty(items)) {
             val pumpHistoryEntryType = items[0].entryType
+            aapsLogger.debug(LTag.PUMP, "ljw isPumpSuspended: " + items[0].entryType + items[0].atechDateTime)
             val isSuspended = !(pumpHistoryEntryType === PumpHistoryEntryType.TempBasalCombined || //
                 pumpHistoryEntryType === PumpHistoryEntryType.BasalProfileStart || //
                 pumpHistoryEntryType === PumpHistoryEntryType.Bolus || //
                 pumpHistoryEntryType === PumpHistoryEntryType.ResumePump || //
                 pumpHistoryEntryType === PumpHistoryEntryType.BatteryChange || //
-                pumpHistoryEntryType === PumpHistoryEntryType.Prime)
+                pumpHistoryEntryType === PumpHistoryEntryType.Prime || //
+                (pumpHistoryEntryType === PumpHistoryEntryType.SuspendPump && items[0].atechDateTime === 20600030002060))
             aapsLogger.debug(LTag.PUMP, String.format(Locale.ENGLISH, "isPumpSuspended. Last entry type=%s, isSuspended=%b", pumpHistoryEntryType, isSuspended))
             isSuspended
         } else false
@@ -358,7 +360,7 @@ class MedtronicHistoryData @Inject constructor(
         aapsLogger.debug(LTag.PUMP, String.format(Locale.ENGLISH, "ProcessHistoryData: TBRs Processed [count=%d, items=%s]", tbrs.size, gson.toJson(tbrs)))
         if (tbrs.isNotEmpty()) {
             try {
-                processTBREntries(tbrs, rewindRecords)
+                processTBREntries(tbrs)
             } catch (ex: Exception) {
                 aapsLogger.error(LTag.PUMP, "ProcessHistoryData: Error processing TBR entries: " + ex.message, ex)
                 throw ex
@@ -583,7 +585,7 @@ class MedtronicHistoryData @Inject constructor(
         }
     }
 
-    private fun processTBREntries(entryList: MutableList<PumpHistoryEntry>, rewindList: MutableList<PumpHistoryEntry>) {
+    private fun processTBREntries(entryList: MutableList<PumpHistoryEntry>) {
         entryList.reverse()
         val tbr = entryList[0].getDecodedDataEntry("Object") as TempBasalPair
 //        var readOldItem = false
@@ -607,7 +609,7 @@ class MedtronicHistoryData @Inject constructor(
 
         val tbrRecords = pumpSyncStorage.getTBRs()
 
-        val processList: MutableList<TempBasalProcessDTO> = createTBRProcessList(entryList, rewindList)
+        val processList: MutableList<TempBasalProcessDTO> = createTBRProcessList(entryList)
 
         if (processList.isNotEmpty()) {
             for (tempBasalProcessDTO in processList) {
@@ -731,7 +733,7 @@ class MedtronicHistoryData @Inject constructor(
     }
 
 
-    fun createTBRProcessList(entryList: MutableList<PumpHistoryEntry>, rewindList: MutableList<PumpHistoryEntry>) : MutableList<TempBasalProcessDTO> {
+    fun createTBRProcessList(entryList: MutableList<PumpHistoryEntry>) : MutableList<TempBasalProcessDTO> {
 
         aapsLogger.debug(LTag.PUMP, "${ProcessHistoryRecord.TBR.description}  List (before filter): ${gson.toJson(entryList)}")
 
@@ -797,24 +799,68 @@ class MedtronicHistoryData @Inject constructor(
             }
         }
 
-        // see if rewind items, need to fix any of current tempBasalProcessDTO items (bug 1724)
-        if (rewindList.isNotEmpty()) {
-            for (rewindEntry in rewindList) {
-                for (tempBasalProcessDTO in processList) {
-                    if (tempBasalProcessDTO.itemTwo==null) {
-                        val endTime: Long = DateTimeUtil.getATDWithAddedMinutes(tempBasalProcessDTO.itemOne.atechDateTime, tempBasalProcessDTO.itemOneTbr!!.durationMinutes)
+        // TODO this solution needs to be overworked, commenting out for now
+        // val suspendList = getFilteredItems(newHistory,  //
+        //                                      setOf(PumpHistoryEntryType.SuspendPump))
+        //
+        // val stopList : MutableList<PumpHistoryEntry> = mutableListOf()
+        // stopList.addAll(suspendList);
+        // stopList.addAll(rewindList);
+        //
+        // // TODO remove see if rewind items, need to fix any of current tempBasalProcessDTO items (bug 1724)
+        // if (rewindList.isNotEmpty()) {
+        //     for (rewindEntry in rewindList) {
+        //         for (tempBasalProcessDTO in processList) {
+        //             if (tempBasalProcessDTO.itemTwo==null) {
+        //                 val endTime: Long = DateTimeUtil.getATDWithAddedMinutes(tempBasalProcessDTO.itemOne.atechDateTime, tempBasalProcessDTO.itemOneTbr!!.durationMinutes)
+        //
+        //                 if ((rewindEntry.atechDateTime > tempBasalProcessDTO.itemOne.atechDateTime) &&
+        //                     (rewindEntry.atechDateTime < endTime)) {
+        //                     tempBasalProcessDTO.itemTwo = rewindEntry
+        //                     continue
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        //
+        // // see if have rewind/stop items that need to fix any of current tempBasalProcessDTO items (bug 1724)
+        // if (stopList.isNotEmpty()) {
+        //     for (tempBasalProcessDTO in processList) {
+        //         if (tempBasalProcessDTO.itemTwo==null) {
+        //             val endTime: Long = DateTimeUtil.getATDWithAddedMinutes(tempBasalProcessDTO.itemOne.atechDateTime, tempBasalProcessDTO.itemOneTbr!!.durationMinutes)
+        //
+        //             val findNearestEntry = findNearestEntry(tempBasalProcessDTO.itemOne.atechDateTime, endTime, stopList);
+        //
+        //             if (findNearestEntry!=null) {
+        //                 tempBasalProcessDTO.itemTwo = findNearestEntry
+        //                 stopList.remove(findNearestEntry)
+        //             }
+        //         }
+        //     }
+        // }
 
-                        if ((rewindEntry.atechDateTime > tempBasalProcessDTO.itemOne.atechDateTime) &&
-                            (rewindEntry.atechDateTime < endTime)) {
-                            tempBasalProcessDTO.itemTwo = rewindEntry
-                            continue
-                        }
-                    }
-                }
+        return processList
+    }
+
+    fun findNearestEntry(startTime: Long, endTime: Long, list: MutableList<PumpHistoryEntry>) : PumpHistoryEntry? {
+        val outList: MutableList<PumpHistoryEntry> = mutableListOf()
+
+        for (pumpHistoryEntry in list) {
+            if ((pumpHistoryEntry.atechDateTime > startTime) &&
+                (pumpHistoryEntry.atechDateTime < endTime)) {
+                outList.add(pumpHistoryEntry)
             }
         }
 
-        return processList
+        if (outList.size == 0) {
+            return null
+        } else if (outList.size==1) {
+            return outList[0]
+        } else {
+            // TODO
+            return null
+        }
     }
 
     fun isTBRActive(dbEntry: PumpDbEntryTBR): Boolean {

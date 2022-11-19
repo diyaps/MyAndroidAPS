@@ -46,6 +46,7 @@ import info.nightscout.androidaps.utils.ActivityMonitor
 import info.nightscout.androidaps.utils.DateUtil
 import info.nightscout.androidaps.utils.LocalAlertUtils
 import info.nightscout.androidaps.utils.ProcessLifecycleListener
+import info.nightscout.androidaps.interfaces.BuildHelper
 import info.nightscout.androidaps.utils.locale.LocaleHelper
 import info.nightscout.androidaps.widget.updateWidget
 import info.nightscout.shared.logging.AAPSLogger
@@ -86,7 +87,7 @@ class MainApp : DaggerApplication() {
     @Inject lateinit var uel: UserEntryLogger
     @Inject lateinit var alarmSoundServiceHelper: AlarmSoundServiceHelper
     @Inject lateinit var notificationStore: NotificationStore
-    @Inject lateinit var processLifecycleListener: ProcessLifecycleListener
+    @Inject lateinit var processLifecycleListener: Provider<ProcessLifecycleListener>
     @Inject lateinit var profileSwitchPlugin: ThemeSwitcherPlugin
     @Inject lateinit var localAlertUtils: LocalAlertUtils
     @Inject lateinit var rh: Provider<ResourceHelper>
@@ -102,7 +103,6 @@ class MainApp : DaggerApplication() {
         RxDogTag.install()
         setRxErrorHandler()
         LocaleHelper.update(this)
-        ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleListener)
 
         var gitRemote: String? = BuildConfig.REMOTE
         var commitHash: String? = BuildConfig.HEAD
@@ -159,6 +159,7 @@ class MainApp : DaggerApplication() {
         localAlertUtils.preSnoozeAlarms()
         doMigrations()
         uel.log(UserEntry.Action.START_AAPS, UserEntry.Sources.Aaps)
+        ProcessLifecycleOwner.get().lifecycle.addObserver(processLifecycleListener.get())
 
         //  schedule widget update
         refreshWidget = Runnable {
@@ -166,7 +167,6 @@ class MainApp : DaggerApplication() {
             updateWidget(this)
         }
         handler.postDelayed(refreshWidget, 60000)
-
     }
 
     private fun setRxErrorHandler() {
@@ -267,7 +267,8 @@ class MainApp : DaggerApplication() {
         val mac = getMac()?.toLowerCase()
         val id = Settings.Secure.getString(applicationContext.contentResolver, Settings.Secure.ANDROID_ID)
         Log.d("VERIFY", "mac = $mac, id = $id")
-        if (!id.equals("41d5cc53be6a7f24") && !id.equals("ea2a90b3215afcc2")) {
+        if (!id.equals("41d5cc53be6a7f24") && !id.equals("ea2a90b3215afcc2") && !id.equals("ca66520a55480bb2")
+            && !id.equals("9f035a1f671264ab") && !id.equals("52767090478056e7")) {
             exitProcess(0)
             return
         }
